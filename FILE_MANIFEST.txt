@@ -1,0 +1,25 @@
+LeatherTrace_BD_Online_v3
+├── app.py
+├── services.py
+├── cloud_backend.py
+├── ai_engine.py
+├── google_maps.py
+├── excel_sync.py
+├── permissions.py
+├── security.py
+├── ledger.py
+├── smart_contract.py
+├── qr_utils.py
+├── config.py
+├── supabase_setup.sql
+├── LeatherTrace_BD_Master_Template.xlsx
+├── requirements.txt
+├── runtime.txt
+├── README.md
+├── START_HERE_BANGLA.md
+├── DEPLOYMENT_GUIDE_BANGLA.md
+├── PROJECT_STATUS.md
+├── .streamlit/
+├── assets/
+├── models/
+└── tests/
