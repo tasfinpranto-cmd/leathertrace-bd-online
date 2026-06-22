@@ -140,10 +140,24 @@ def overview_page() -> None:
     c3.metric("Decisions", len(db.select("decisions")))
     c4.metric("Finished lots", len(db.select("finished_lots")))
     integrity = verify_ledger(db)
-    st.success(f"Ledger verified: {integrity.get('checked',0)} transactions") if integrity.get("valid") else st.error(integrity.get("message"))
-    st.markdown("**Flow:** Collector photo + GPS + time → automatic AI grading → blockchain-backed record → tannery sees photo/time/location/grade before receipt → quality confirmation → processing/compliance → buyer/auditor read-only traceability.")
+    if integrity.get("valid"):
+        st.success(f"Ledger verified: {integrity.get('checked', 0)} transactions")
+    else:
+        st.error(str(integrity.get("message") or "Ledger verification failed"))
+
+    st.markdown(
+        "**Flow:** Collector photo + GPS + time → automatic AI grading → "
+        "blockchain-backed record → tannery sees photo/time/location/grade before "
+        "receipt → quality confirmation → processing/compliance → "
+        "buyer/auditor read-only traceability."
+    )
+
     model = Path(__file__).parent / "assets" / "model_reference.png"
-    if model.exists(): st.image(str(model), caption="Reference model", use_container_width=True)
+    if model.exists():
+        try:
+            st.image(str(model), caption="Reference model", width="stretch")
+        except Exception as image_exc:
+            st.warning(f"Reference model image could not be displayed: {image_exc}")
 
 
 def location_controls(prefix: str) -> dict[str, Any]:
@@ -254,8 +268,12 @@ def tannery_page() -> None:
         notes = st.text_area("Receiving notes")
         submitted = st.form_submit_button("Confirm receipt", use_container_width=True)
     if submitted:
-        try: st.success(f"Receipt {receive_batch(db,user,int(row['id']),quantity,notes)} confirmed"); st.rerun()
-        except Exception as exc: st.error(str(exc))
+        try:
+            receipt_id = receive_batch(db, user, int(row["id"]), quantity, notes)
+            st.success(f"Receipt {receipt_id} confirmed")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def quality_page() -> None:
@@ -271,8 +289,12 @@ def quality_page() -> None:
         reason=st.text_area("Override reason if different")
         submitted=st.form_submit_button("Confirm grade",use_container_width=True)
     if submitted:
-        try: confirm_grade(db,user,int(row["id"]),grade,reason); st.success("Grade confirmed"); st.rerun()
-        except Exception as exc: st.error(str(exc))
+        try:
+            confirm_grade(db, user, int(row["id"]), grade, reason)
+            st.success("Grade confirmed")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def environmental_page() -> None:
@@ -283,8 +305,23 @@ def environmental_page() -> None:
         c1,c2,c3,c4=st.columns(4); ph=c1.number_input("pH",0.0,14.0,7.2); cr=c2.number_input("Chromium mg/L",0.0,value=1.2); bod=c3.number_input("BOD mg/L",0.0,value=40.0); cod=c4.number_input("COD mg/L",0.0,value=160.0)
         submitted=st.form_submit_button("Save, record ledger and update Excel",use_container_width=True)
     if submitted:
-        try: st.success(f"Record {create_environmental_record(db,user,{'production_shift_id':shift,'sample_timestamp':sample,'measurement_source':source,'ph':ph,'chromium_mgL':cr,'bod_mgL':bod,'cod_mgL':cod})} created")
-        except Exception as exc: st.error(str(exc))
+        try:
+            record_id = create_environmental_record(
+                db,
+                user,
+                {
+                    "production_shift_id": shift,
+                    "sample_timestamp": sample,
+                    "measurement_source": source,
+                    "ph": ph,
+                    "chromium_mgL": cr,
+                    "bod_mgL": bod,
+                    "cod_mgL": cod,
+                },
+            )
+            st.success(f"Record {record_id} created")
+        except Exception as exc:
+            st.error(str(exc))
     dataframe(db.select("environmental_records",order="id",desc=True))
 
 
@@ -299,8 +336,21 @@ def processing_page() -> None:
             stage=st.selectbox("Process stage",["Wet Blue","Crust","Finished Leather"]); start=st.text_input("Start time",datetime.now().replace(microsecond=0).isoformat()); end=st.text_input("End time (optional)"); output=st.number_input("Output area sq ft",0.0,value=0.0)
             submitted=st.form_submit_button("Create processing lot and decision",use_container_width=True)
         if submitted:
-            try: st.json(create_processing_and_decision(db,user,int(row["id"]),shift,int(env["id"]) if env else None,stage,start,end or None,output or None))
-            except Exception as exc: st.error(str(exc))
+            try:
+                result = create_processing_and_decision(
+                    db,
+                    user,
+                    int(row["id"]),
+                    shift,
+                    int(env["id"]) if env else None,
+                    stage,
+                    start,
+                    end or None,
+                    output or None,
+                )
+                st.json(result)
+            except Exception as exc:
+                st.error(str(exc))
     st.subheader("Create finished leather lot")
     procs=db.select("processing_view",order="id",desc=True); existing={r["processing_lot_id"] for r in db.select("finished_lots",columns="processing_lot_id")}
     eligible=[p for p in procs if p["id"] not in existing and p.get("final_decision") in ("Accepted","Conditionally Accepted")]
@@ -311,8 +361,13 @@ def processing_page() -> None:
             market=st.selectbox("Destination",["Domestic","EU","Other Export"]); buyer=st.text_input("Buyer reference")
             submitted=st.form_submit_button("Create finished lot",use_container_width=True)
         if submitted:
-            try: st.json(create_finished_lot(db,user,int(p["id"]),market,buyer or None))
-            except Exception as exc: st.error(str(exc))
+            try:
+                result = create_finished_lot(
+                    db, user, int(p["id"]), market, buyer or None
+                )
+                st.json(result)
+            except Exception as exc:
+                st.error(str(exc))
 
 
 def buyer_page() -> None:
@@ -329,7 +384,11 @@ def buyer_page() -> None:
 
 def auditor_page() -> None:
     st.header("Auditor / Ledger Verification")
-    result=verify_ledger(db); st.success(result) if result.get("valid") else st.error(result)
+    result = verify_ledger(db)
+    if result.get("valid"):
+        st.success(result)
+    else:
+        st.error(result)
     dataframe(db.select("ledger_transactions",order="id",desc=True))
     st.subheader("Excel sync audit"); dataframe(db.select("excel_sync_log",order="id",desc=True))
 
@@ -390,14 +449,30 @@ def admin_page() -> None:
             role=st.selectbox("Role",list(ROLES),format_func=lambda r:ROLES[r]); org=st.text_input("Organisation"); region=st.text_input("Region/organisation code","DHK")
             submitted=st.form_submit_button("Create user")
         if submitted:
-            try: st.success(create_user(db,user,username=username,full_name=full,temporary_password=password,role=role,organisation=org,region_code=region))
-            except Exception as exc: st.error(str(exc))
+            try:
+                new_user_id = create_user(
+                    db,
+                    user,
+                    username=username,
+                    full_name=full,
+                    temporary_password=password,
+                    role=role,
+                    organisation=org,
+                    region_code=region,
+                )
+                st.success(new_user_id)
+            except Exception as exc:
+                st.error(str(exc))
     if users:
         selected={u["individual_user_id"]:u for u in users}[st.selectbox("Account status",[u["individual_user_id"] for u in users])]
         active=st.checkbox("Active",value=bool(selected["active"]));
         if st.button("Update status"):
-            try:set_user_active(db,user,int(selected["id"]),active);st.success("Updated");st.rerun()
-            except Exception as exc:st.error(str(exc))
+            try:
+                set_user_active(db, user, int(selected["id"]), active)
+                st.success("Updated")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
 header()
 ROLE_PAGES={
@@ -410,11 +485,36 @@ ROLE_PAGES={
     "auditor":["Overview","Audit & ledger","Excel data hub","Change password"],
     "admin":["Overview","Collector portal","Tannery receiving","Quality inspection","Environmental monitoring","Processing & decisions","Buyer traceability","Audit & ledger","Excel data hub","Administration","Change password"],
 }
-page=st.sidebar.radio("Navigation",ROLE_PAGES[user["role"]]); st.sidebar.caption("Access is enforced by individual ID, organisation, role and access profile.")
-handlers={"Overview":overview_page,"Collector portal":collector_page,"Tannery receiving":tannery_page,"Quality inspection":quality_page,"Environmental monitoring":environmental_page,"Processing & decisions":processing_page,"Buyer traceability":buyer_page,"Audit & ledger":auditor_page,"Excel data hub":excel_hub_page,"Administration":admin_page,"Change password":password_page}
-try:handlers[page]()
-except PermissionError as exc:st.error(str(exc))
+page = st.sidebar.radio("Navigation", ROLE_PAGES[user["role"]])
+st.sidebar.caption(
+    "Access is enforced by individual ID, organisation, role and access profile."
+)
+handlers = {
+    "Overview": overview_page,
+    "Collector portal": collector_page,
+    "Tannery receiving": tannery_page,
+    "Quality inspection": quality_page,
+    "Environmental monitoring": environmental_page,
+    "Processing & decisions": processing_page,
+    "Buyer traceability": buyer_page,
+    "Audit & ledger": auditor_page,
+    "Excel data hub": excel_hub_page,
+    "Administration": admin_page,
+    "Change password": password_page,
+}
+
+try:
+    handlers[page]()
+except PermissionError as exc:
+    st.error(str(exc))
 except Exception as exc:
     st.error(f"Operation failed: {exc}")
-    with st.expander("Technical details"):st.exception(exc)
-st.divider();st.caption("Academic proof-of-concept. AI inference is only industrially valid after training and validation on labelled leather images. The ledger is a cloud SHA-256 tamper-evident prototype, not a deployed Hyperledger Fabric consortium.")
+    with st.expander("Technical details"):
+        st.exception(exc)
+
+st.divider()
+st.caption(
+    "Academic proof-of-concept. AI inference is only industrially valid after "
+    "training and validation on labelled leather images. The ledger is a cloud "
+    "SHA-256 tamper-evident prototype, not a deployed Hyperledger Fabric consortium."
+)
